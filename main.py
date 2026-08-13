@@ -455,4 +455,70 @@ async def admin_panel(message: types.Message):
     if message.from_user.id != ADMIN_ID and message.from_user.username != ADMIN_USERNAME:
         return
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎁 Выдать ВИП по @username", callback_data="adm_give_v
+        [InlineKeyboardButton(text="🎁 Выдать ВИП по @username", callback_data="adm_give_vip")]
+    ])
+    await message.answer("👑 **Панель администратора:**", reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data == "adm_give_vip")
+async def adm_give_vip_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("✏️ Введите @username пользователя (без знака @):")
+    await state.set_state(AdminState.waiting_for_username)
+    await callback.answer()
+
+@dp.message(AdminState.waiting_for_username)
+async def adm_get_username(message: types.Message, state: FSMContext):
+    username = message.text.replace("@", "").strip()
+    await state.update_data(target_username=username)
+    await message.answer("⏳ На сколько дней выдать ВИП? (введите число):")
+    await state.set_state(AdminState.waiting_for_days)
+
+@dp.message(AdminState.waiting_for_days)
+async def adm_get_days(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("⚠️ Введите число дней:")
+        return
+    
+    days = int(message.text)
+    data = await state.get_data()
+    username = data.get("target_username")
+
+    async with db_pool.acquire() as conn:
+        user = await conn.fetchrow("SELECT * FROM users WHERE LOWER(username) = LOWER($1)", username)
+        if not user:
+            await message.answer(f"❌ Пользователь @{username} не найден в базе данных бота.")
+            await state.clear()
+            return
+
+        now = datetime.now()
+        start_date = user['vip_until'] if user['vip_until'] and user['vip_until'] > now else now
+        new_vip = start_date + timedelta(days=days)
+        
+        await conn.execute("UPDATE users SET is_vip = TRUE, vip_until = $1 WHERE user_id = $2", new_vip, user['user_id'])
+
+    try:
+        await bot.send_message(chat_id=user['user_id'], text=f"🎉 Администратор выдал вам 💎 **ВИП на {days} дней**!")
+    except Exception:
+        pass
+
+    await message.answer(f"✅ Пользователю @{username} успешно выдан ВИП на {days} дней!")
+    await state.clear()
+
+async def handle_ping(request):
+    return web.Response(text="Bot is alive!")
+
+async def main():
+    global db_pool
+    db_pool = await asyncpg.create_pool(DATABASE_URL)
+    
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 10000)
+    await site.start()
+
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+    
