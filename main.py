@@ -467,7 +467,7 @@ async def process_pre_checkout(pre_checkout_query: PreCheckoutQuery):
 async def process_successful_payment(message: types.Message):
     days = int(message.successful_payment.invoice_payload.split("_")[1])
     async with db_pool.acquire() as conn:
-        user = await conn.fetchrow("SELECT vip_until FROM users WHERE user_id = $1", mess
+        user = await conn.fetchrow("SELECT vip_until FROM users WHERE user_id = $1", message.from_user.id)
         now = datetime.now()
         start_date = user['vip_until'] if user['vip_until'] and user['vip_until'] > now else now
         await conn.execute("UPDATE users SET is_vip = TRUE, vip_until = $1 WHERE user_id = $2", start_date + timedelta(days=days), message.from_user.id)
